@@ -1,0 +1,219 @@
+---
+
+# ansible-playbook -i INVENTORYFILE loadbalancer-testing.yml
+
+- hosts: "loadbalanced_hosts"
+
+  tasks:
+
+  # BUILD STEPS
+
+  - name: debug... list all hosts
+    debug:
+      msg: "{{ ansible_play_hosts_all }}"
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  # On Ansible Bastion, create openssl.cnf files from loadbalancer.cnf.j2 openssl config
+
+  - name: Create temporary directory
+    tempfile:
+      state: directory
+      suffix: ".loadbalancer_test"
+    register: local_tmp_dir
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  - name: Generate an OpenSSL private key
+    openssl_privatekey:
+      path: "{{ local_tmp_dir.path }}/temporary.key"
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  - name: Generate an OpenSSL CSR
+    openssl_csr:
+      path: "{{ local_tmp_dir.path }}/temporary.csr"
+      privatekey_path: "{{ local_tmp_dir.path }}/temporary.key"
+      common_name: "*.domain.tld"
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  - name: Generate a Self Signed Cert
+    openssl_certificate:
+      path: "{{ local_tmp_dir.path }}/temporary.crt"
+      privatekey_path: "{{ local_tmp_dir.path }}/temporary.key"
+      csr_path: "{{ local_tmp_dir.path }}/temporary.csr"
+      provider: selfsigned
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  # start firewalld
+  - name: Ensure firewalld is running
+    systemd:
+      name: firewalld
+      state: started
+
+  # firewalld , open port 443 (temporary)
+  - name: Temporarily open port 443
+    firewalld:
+      service: https
+      state: enabled
+
+  # Test to see if remote machine has port 443 already bound/in-use
+  ## Fail if port 443 is already bound
+  ## Maybe try to kill our process if it was still running
+
+  ## Kill the python-app
+  - name: Kill anything listening to 443
+    shell: "fuser -k -n tcp 443"
+    failed_when: false
+
+  - name: Check if service is running by querying the application port
+    wait_for:
+      port: 443
+      timeout: 10
+      state: stopped
+      msg: "Port 443 is listening, some application is bound to that port"
+    register: service_status
+
+  # Create a new dir on remote host that will contain the SSL Cert, SSL Key, index.html, and python-app
+  - name: Create temporary directory
+    tempfile:
+      state: directory
+      suffix: ".loadbalancer_test"
+    register: remote_tmp_dir
+
+  # Copy SSL certificate with key from Ansible Bastion to remote host
+  - name: Copy files to remote
+    copy:
+      src: "{{ local_tmp_dir.path }}/{{ item }}"
+      dest: "{{ remote_tmp_dir.path }}/{{ item }}"
+    with_items:
+      - temporary.key
+      - temporary.crt
+
+  # Copy python-app to server (ensure it knows where to find the SSL Cert and SSL key)
+  - name: Copy python-app to remote
+    copy:
+      src: "../scripts/local-ssl-server.py"
+      dest: "{{ remote_tmp_dir.path }}/local-ssl-server.py"
+
+  # Create index.html with output from "hostname -a"
+
+  - name: create index.html
+    template:
+      src: "../templates/index.html.j2"
+      dest: "{{ remote_tmp_dir.path }}/index.html"
+
+  # TEST
+  # Start the python-app
+  - name: start simple http server in background
+    shell: "cd {{ remote_tmp_dir.path }}; nohup python local-ssl-server.py </dev/null >/dev/null 2>&1 &"
+
+  # Test to see if it is listening
+  - name: Check if service is running by querying the application port
+    wait_for:
+      port: 443
+      timeout: 10
+      msg: "Port 443 is listening, some application is bound to that port"
+    register: my_service_status
+
+  # From Ansible Bastion, hit port 443 on remote host and fetch output
+  - name: Get web output
+    shell: wget -O - https://{{ ansible_fqdn }}/ --no-check-certificate
+    register: web
+    delegate_to: 127.0.0.1
+
+  - name:
+    debug:
+      msg: "I got: {{ web.stdout }}"
+
+  - name: Test to see if the web site visited matches the hostname returned
+    assert:
+      that: "web.stdout == ansible_fqdn"
+      msg: "{{ web.stdout }} does not match {{ ansible_fqdn }}, maybe check DNS?"
+
+  # Set serial to 1
+  # Sleep for 30 seconds while we wait for the F5 Load balancer to add the hosts
+  #
+  - name: Pause for 30 seconds
+    pause:
+      seconds: 30
+
+##############################################################
+# repeat this for masters, HA infra routers, etc
+##############################################################
+- hosts: "masters"
+
+  tasks:
+
+  - name: Test the 'masters' loadbalancer
+    loadbalancer_test:
+      host_list: "{{ groups['masters'] }}"
+      load_balancer_url: "https://{{ my_loadbalancer }}"
+      test_timeout: 30
+      test_delay: 1
+    run_once: true
+    ignore_errors: true
+    delegate_to: 127.0.0.1
+
+##############################################################
+# repeat this for masters, HA infra routers, etc
+##############################################################
+- hosts: "infra"
+
+  vars:
+    lb_prefix: lb-test
+
+  tasks:
+
+  - name: Test the 'opsinfra' loadbalancer
+    loadbalancer_test:
+      host_list: "{{ groups['infra'] }}"
+      load_balancer_url: "https://{{ lb_prefix }}.{{ my_loadbalancer }}"
+      test_timeout: 30
+      test_delay: 1
+    run_once: true
+    ignore_errors: true
+    delegate_to: 127.0.0.1
+
+###################################
+
+- hosts: "loadbalanced_hosts"
+
+  tasks:
+
+  # CLEAN UP
+
+  ## Delete the tmp files on remote
+  - name: Clean up temporary files on remote
+    file:
+      path: "{{ remote_tmp_dir.path }}/{{ item }}"
+      state: absent
+    with_items:
+      - temporary.key
+      - temporary.crt
+      - local-ssl-server.py
+      - index.html
+
+  - name: Clean up temporary files on local Ansible machine
+    file:
+      path: "{{ local_tmp_dir.path }}/{{ item }}"
+      state: absent
+    with_items:
+      - yourpemfile.pem
+      - lb_ssl.cnf
+    delegate_to: 127.0.0.1
+    run_once: true
+
+  ## Kill whatever is listening to port 443 (a bit brutal)
+  - name: Kill anything listening on 443
+    shell: "fuser -k -n tcp 443"
+
+  - name: Check if service is stopped
+    wait_for:
+      port: 443
+      timeout: 10
+      state: stopped
+      msg: "Port 443 is listening, some application is bound to that port"
+    register: service_status
