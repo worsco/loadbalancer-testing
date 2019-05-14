@@ -33,11 +33,17 @@ Vagrant.configure("2") do |config|
       srv.vm.network :forwarded_port, guest: 22, host: servers["port"] # Add a port forwarding rule
       srv.vm.provision :shell, inline: "sed -i'' '/^127.0.0.1\\t#{srv.vm.hostname}\\t#{srv.vm.hostname}$/d' /etc/hosts"
  
-      srv.vm.provider :virtualbox do |vb|
-        vb.name = servers["name"] # Name of the VM in VirtualBox
-        vb.cpus = servers["cpus"] # How many CPUs to allocate to the VM
-        vb.memory = servers["ram"] # How much memory to allocate to the VM
-        vb.customize ["modifyvm", :id, "--cpuexecutioncap", "33"]  # Limit to VM to 33% of available CPU
+      #srv.vm.provider :virtualbox do |vb|
+      #  vb.name = servers["name"] # Name of the VM in VirtualBox
+      #  vb.cpus = servers["cpus"] # How many CPUs to allocate to the VM
+      #  vb.memory = servers["ram"] # How much memory to allocate to the VM
+      #  vb.customize ["modifyvm", :id, "--cpuexecutioncap", "33"]  # Limit to VM to 33% of available CPU
+      #end
+      srv.vm.provider :libvirt do |lv|
+        #lv.name = servers["name"] # Name of the VM in VirtualBox
+        lv.cpus = servers["cpus"] # How many CPUs to allocate to the VM
+        lv.memory = servers["ram"] # How much memory to allocate to the VM
+      ##  vb.customize ["modifyvm", :id, "--cpuexecutioncap", "33"]  # Limit to VM to 33% of available CPU
       end
     end
   end
