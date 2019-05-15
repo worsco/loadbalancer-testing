@@ -24,26 +24,15 @@
     delegate_to: 127.0.0.1
     run_once: true
 
-  - name: Generate an OpenSSL private key
-    openssl_privatekey:
-      path: "{{ local_tmp_dir.path }}/temporary.key"
-    delegate_to: 127.0.0.1
-    run_once: true
-
-  - name: Generate an OpenSSL CSR
-    openssl_csr:
-      path: "{{ local_tmp_dir.path }}/temporary.csr"
-      privatekey_path: "{{ local_tmp_dir.path }}/temporary.key"
-      common_name: "*.domain.tld"
+  - name: Create template for openssh
+    template:
+      src: ../templates/loadbalancer_test_openssl.cnf.j2
+      dest: "{{ local_tmp_dir.path }}/lb_ssl.cnf"
     delegate_to: 127.0.0.1
     run_once: true
 
   - name: Generate a Self Signed Cert
-    openssl_certificate:
-      path: "{{ local_tmp_dir.path }}/temporary.crt"
-      privatekey_path: "{{ local_tmp_dir.path }}/temporary.key"
-      csr_path: "{{ local_tmp_dir.path }}/temporary.csr"
-      provider: selfsigned
+    shell: "/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -out {{ local_tmp_dir.path }}/temporary.crt -keyout {{ local_tmp_dir.path }}/temporary.key -config {{ local_tmp_dir.path }}/lb_ssl.cnf"
     delegate_to: 127.0.0.1
     run_once: true
 
