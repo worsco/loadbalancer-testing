@@ -1,3 +1,3 @@
 - "sudo yum -y install net-tools ntp wget"
 - "sudo systemctl enable ntpd && sudo systemctl start ntpd"
-- "sudo yum -y update"
+#- "sudo yum -y update"

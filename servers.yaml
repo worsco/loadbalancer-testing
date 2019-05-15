@@ -5,27 +5,3 @@
   ram: 512
   ip: 192.168.56.101
   port: 10122
-- name: nginx
-  box: centos/7
-  cpus: 2
-  ram: 512
-  ip: 192.168.56.102
-  port: 10222
-- name: infra01
-  box: centos/7
-  cpus: 2
-  ram: 512
-  ip: 192.168.56.103
-  port: 10322
-- name: infra02
-  box: centos/7
-  cpus: 2
-  ram: 512
-  ip: 192.168.56.104
-  port: 10422
-- name: infra03
-  box: centos/7
-  cpus: 2
-  ram: 512
-  ip: 192.168.56.105
-  port: 10522
